@@ -1,0 +1,2056 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task Board</title>
+
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+
+<style>
+/* ========== THEME ========== */
+:root {
+  --bg: #f5f6f8;
+  --bg-toolbar: #ffffff;
+  --bg-column: #eef0f3;
+  --bg-column-header: #e2e5ea;
+  --bg-card: #ffffff;
+  --bg-popup: #ffffff;
+  --bg-field: #f7f8fa;
+  --bg-input: #ffffff;
+  --text: #1f2430;
+  --muted: #6b7280;
+  --border: rgba(0, 0, 0, 0.1);
+  --accent: #2563eb;
+  --danger: #dc2626;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1c23;
+    --bg-toolbar: #22252e;
+    --bg-column: #22252e;
+    --bg-column-header: #2b2f3a;
+    --bg-card: #2d323f;
+    --bg-popup: #22252e;
+    --bg-field: #262a34;
+    --bg-input: #1a1c23;
+    --text: #e7e9ee;
+    --muted: #9aa1b2;
+    --border: rgba(255, 255, 255, 0.1);
+    --accent: #5b8def;
+    --danger: #f0554d;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ========== TOOLBAR / BINS ========== */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
+  min-height: 2.75rem;
+}
+
+.bins {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Bins are archival shortcuts for a big screen/desk session — on a phone
+   there's no room for them and no pointer precise enough to drag a card
+   into one. The toolbar's only other occupant, the settings gear, goes
+   with it: board settings become desktop/tablet-only rather than leaving
+   a near-empty bar behind just to host that one button. */
+@media (max-width: 768px), (pointer: coarse) {
+  .toolbar {
+    display: none;
+  }
+}
+
+.bin {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: var(--bg-field);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--text);
+  user-select: none;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.bin:hover {
+  background: var(--bg-column-header);
+}
+
+.bin.drag-over {
+  box-shadow: 0 0 0 2px var(--accent) inset;
+}
+
+.bin-count {
+  background: rgba(127, 127, 127, 0.25);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+.toolbar-btn {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.2rem;
+  cursor: pointer;
+  opacity: 0.75;
+  line-height: 1;
+  padding: 0.1rem 0.4rem;
+}
+
+.toolbar-btn:hover {
+  opacity: 1;
+}
+
+/* ========== BOARD ========== */
+/* Horizontal sections, one per status, stacked down the page — the page
+   itself scrolls (no fixed-height/overflow-auto boxes), and each section's
+   cards wrap into a flowing grid rather than a single vertical list. */
+#board {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  padding: 1rem;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-column);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.section-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--bg-column-header);
+  border-bottom: 3px solid var(--col-color, var(--accent));
+}
+
+.section-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.section-count {
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: rgba(127, 127, 127, 0.25);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  margin-left: 0.4rem;
+}
+
+.section-add-btn {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.15rem;
+  cursor: pointer;
+  opacity: 0.75;
+  line-height: 1;
+  padding: 0.1rem 0.35rem;
+}
+
+.section-add-btn:hover {
+  opacity: 1;
+}
+
+.section-body {
+  flex: 1 1 auto;
+  padding: 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.75rem;
+  min-height: 3.5rem;
+}
+
+.section-empty {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-align: center;
+  padding: 1rem 0.3rem;
+}
+
+/* ========== CARDS ========== */
+.card {
+  flex: 1 1 260px;
+  max-width: 340px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  border-left: 3px solid var(--col-color, var(--accent));
+}
+
+.card:hover {
+  filter: brightness(1.03);
+}
+
+.card.sortable-ghost {
+  opacity: 0.4;
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  margin: 0 0 0.4rem;
+  word-break: break-word;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.card-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  white-space: nowrap;
+}
+
+.card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.card-priority,
+.card-team {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: rgba(127, 127, 127, 0.25);
+}
+
+.card-team {
+  background: rgba(37, 99, 235, 0.15);
+  color: var(--accent);
+}
+
+/* ========== OVERLAY + POPUP ========== */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 900;
+}
+
+.overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.popup {
+  position: fixed;
+  top: 0;
+  right: -100%;
+  width: 100%;
+  max-width: 480px;
+  height: 100vh;
+  background: var(--bg-popup);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.25);
+  transition: right 0.25s ease;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  border-left: 4px solid var(--col-color, var(--accent));
+}
+
+.popup.visible {
+  right: 0;
+}
+
+/* On phones/coarse pointers, the popup should feel like its own full
+   screen rather than a desktop-style side drawer that happens to be
+   wide — drop the max-width cap and side border, and use dvh so mobile
+   browser toolbars showing/hiding doesn't leave a sliver of the board
+   visible at the bottom. */
+@media (max-width: 768px), (pointer: coarse) {
+  .popup {
+    max-width: 100%;
+    height: 100dvh;
+    border-left: none;
+  }
+}
+
+.popup-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.popup-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+  word-break: break-word;
+}
+
+.popup-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.1rem 0.4rem;
+  opacity: 0.75;
+}
+
+.popup-close:hover {
+  opacity: 1;
+}
+
+.popup-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 1rem 1.2rem 6rem;
+}
+
+.field {
+  background: var(--bg-field);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.field-input,
+.field-select,
+.field-textarea {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.field-textarea {
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+.field-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field-readonly-value {
+  font-size: 0.9rem;
+  padding: 0.1rem 0;
+  word-break: break-word;
+}
+
+/* ========== ATTACHMENTS ========== */
+.attachment-field.paste-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.attachment-item {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attachment-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+}
+
+.attachment-item .file-label {
+  font-size: 0.65rem;
+  padding: 0.2rem;
+  text-align: center;
+  word-break: break-all;
+  color: var(--muted);
+}
+
+.attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attachment-dropzone {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 0.6rem;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.attachment-dropzone:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.attachment-dropzone input[type="file"] {
+  display: none;
+}
+
+.popup-actions {
+  position: absolute;
+  bottom: 1rem;
+  right: 1.2rem;
+  display: flex;
+  gap: 0.6rem;
+}
+
+.popup-delete {
+  border: none;
+  background: var(--danger);
+  color: #fff;
+  border-radius: 999px;
+  width: 44px;
+  height: 44px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.toast {
+  position: fixed;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  z-index: 1200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.toast.visible {
+  opacity: 0.95;
+}
+
+/* ========== LIGHTBOX ========== */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1300;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.lightbox.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.lightbox-img {
+  max-width: 92vw;
+  max-height: 92vh;
+  object-fit: contain;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.2rem;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.6rem;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: var(--bg-field);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ========== BOARD SETTINGS (CONFIG) ========== */
+.config-bin-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.config-bin-row .field {
+  background: transparent;
+  padding: 0;
+  margin-bottom: 0.5rem;
+}
+
+.config-bin-row .config-bin-remove {
+  margin-top: 0.2rem;
+}
+
+.config-hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+</style>
+</head>
+<body>
+  <div id="app">
+    <div class="toolbar">
+      <div id="bins" class="bins"></div>
+      <button id="config-open-btn" class="toolbar-btn" type="button" title="Board settings">&#9881;&#65039;</button>
+    </div>
+    <div id="board"></div>
+  </div>
+
+  <div id="overlay" class="overlay"></div>
+  <div id="popup" class="popup">
+    <div class="popup-header">
+      <h2 class="popup-title"></h2>
+      <button class="popup-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="popup-body"></div>
+  </div>
+
+  <div id="config-overlay" class="overlay"></div>
+  <div id="config-panel" class="popup">
+    <div class="popup-header">
+      <h2 class="popup-title">Board settings</h2>
+      <button id="config-close-btn" class="popup-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="popup-body" id="config-body"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <div id="lightbox" class="lightbox">
+    <button class="lightbox-close" type="button" aria-label="Close">&times;</button>
+    <img id="lightbox-img" class="lightbox-img" alt="">
+  </div>
+
+  <script>
+// ========== UTILITIES ==========
+function escapeHtml(v) {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeParseJSON(v) {
+  if (v == null) return null;
+  if (typeof v !== "string") return v;
+  try {
+    return JSON.parse(v);
+  } catch (e) {
+    return null;
+  }
+}
+
+function normalizeKey(v) {
+  return String(v ?? "").trim().toLowerCase();
+}
+
+function normalizeHex(hex) {
+  if (!hex) return null;
+  const h = String(hex).trim();
+  if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(h)) return null;
+  if (h.length === 4) return "#" + h[1] + h[1] + h[2] + h[2] + h[3] + h[3];
+  return h.toLowerCase();
+}
+
+// A widget column mapped to Attachments or ChoiceList arrives as either a
+// plain array or Grist's tagged list encoding ["L", ...items] depending on
+// keepEncoded. Handle both so callers don't need to care. (RefList uses a
+// different tag — see decodeRefList — so don't reuse this for those.)
+function decodeList(raw) {
+  if (!Array.isArray(raw)) return [];
+  if (raw[0] === "L") return raw.slice(1);
+  return raw;
+}
+
+// With keepEncoded:true (which this widget uses throughout, so it always
+// has raw ids to write back), Grist hands Reference/ReferenceList/Date/
+// DateTime cells over as tagged tuples rather than plain values:
+//   Ref      -> ["R", tableId, rowId]
+//   RefList  -> ["r", tableId, [rowId, ...]]
+//   Date     -> ["d", epochSeconds]
+//   DateTime -> ["D", epochSeconds, timezone]
+// Unwrap those before using the value, or a Reference field's dropdown
+// silently fails to match any option (Number(["R", "Foo", 5]) is NaN).
+function decodeRef(raw) {
+  if (Array.isArray(raw) && raw[0] === "R") return Number(raw[2]) || 0;
+  return Number(raw) || 0;
+}
+
+function decodeRefList(raw) {
+  if (Array.isArray(raw) && raw[0] === "r") return (raw[2] || []).map(Number);
+  return decodeList(raw).map(Number);
+}
+
+function decodeDateValue(raw) {
+  if (Array.isArray(raw) && (raw[0] === "d" || raw[0] === "D")) {
+    return typeof raw[1] === "number" ? raw[1] : null;
+  }
+  return typeof raw === "number" ? raw : null;
+}
+
+function baseType(gristType) {
+  return String(gristType || "").split(":")[0];
+}
+
+function refTableOf(gristType) {
+  const parts = String(gristType || "").split(":");
+  return parts.length > 1 ? parts[1] : null;
+}
+
+// Parses a column's widgetOptions JSON for its Choice list (order + colors),
+// same shape Grist uses for Choice/ChoiceList columns.
+function parseChoiceEntries(widgetOptions) {
+  const options = safeParseJSON(widgetOptions);
+  if (!options || typeof options !== "object") return [];
+
+  // Grist's real shape for a styled Choice column is `choices` (the ordered
+  // list of labels) PLUS a separate `choiceOptions` map (label -> fillColor
+  // etc for THE SAME labels) — two views of one set, not two sets. Treating
+  // them as additive (as this used to) double-listed every choice that had
+  // a color configured, and since the `choices`-derived entry (no color)
+  // came first, choiceFillColor's .find() always matched that one, so
+  // configured colors never actually showed up either. Merge them instead:
+  // one entry per label, in `choices` order, with `choiceOptions` styling
+  // folded in.
+  const choiceOptions = (options.choiceOptions && typeof options.choiceOptions === "object" && !Array.isArray(options.choiceOptions))
+    ? options.choiceOptions
+    : {};
+  const seen = new Set();
+  const entries = [];
+
+  if (Array.isArray(options.choices)) {
+    for (const entry of options.choices) {
+      const label = entry && typeof entry === "object" ? entry.label : entry;
+      if (!label || typeof label !== "string") continue;
+      const cfg = choiceOptions[label];
+      entries.push(cfg && typeof cfg === "object" ? { ...entry, ...cfg, label } : (entry && typeof entry === "object" ? entry : { label }));
+      seen.add(label);
+    }
+  }
+  // Any label present only in choiceOptions (no recorded order) still needs
+  // to be selectable, just appended after the ordered ones.
+  for (const [label, cfg] of Object.entries(choiceOptions)) {
+    if (seen.has(label)) continue;
+    entries.push(cfg && typeof cfg === "object" ? { ...cfg, label } : { label });
+  }
+  return entries;
+}
+
+function choiceFillColor(entries, label) {
+  const entry = entries.find((e) => normalizeKey(e.label) === normalizeKey(label));
+  return entry ? normalizeHex(entry.fillColor) : null;
+}
+
+function isMobile() {
+  return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches;
+}
+
+function dateInputValue(epochSeconds) {
+  if (typeof epochSeconds !== "number") return "";
+  const d = new Date(epochSeconds * 1000);
+  if (isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function dateTimeInputValue(epochSeconds) {
+  if (typeof epochSeconds !== "number") return "";
+  const d = new Date(epochSeconds * 1000);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+let toastTimer = null;
+function showToast(message) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.classList.add("visible");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("visible"), 3200);
+}
+
+function openLightbox(src) {
+  document.getElementById("lightbox-img").src = src;
+  document.getElementById("lightbox").classList.add("visible");
+}
+
+function closeLightbox() {
+  document.getElementById("lightbox").classList.remove("visible");
+  document.getElementById("lightbox-img").src = "";
+}
+
+// ========== STATE ==========
+const MAP = {
+  title: "TITLE",
+  status: "STATUS",
+  location: "LOCATION",
+  team: "TEAM",
+  priority: "PRIORITY",
+  extra: "EXTRA",
+  readonlyExtra: "READONLY_EXTRA",
+};
+
+const state = {
+  records: [],       // mapped records (grist.mapColumnNames output), keyed by MAP names + id
+  mappings: {},       // MAP name -> actual grist colId (or array of colIds for EXTRA)
+  tableId: null,
+  schema: null,       // {tableById, colMetaById, colMetaByParentAndColId}
+  refCache: {},       // tableId -> {idToLabel, options:[{id,label}]} or a Promise while loading
+  options: null,       // saved widget options (bins config)
+  popupRecordId: null,
+  activeAttachment: null, // {colId, fieldEl} of the attachment field paste targets right now
+  accessToken: null,   // cached {baseUrl, token}, refreshed lazily
+};
+
+function defaultOptions() {
+  return {
+    bins: [
+      { label: "Completed", match: "Completed", url: "" },
+      { label: "Cancelled", match: "Cancelled", url: "" },
+      { label: "Duplicate", match: "Duplicate", url: "" },
+      { label: "Failed", match: "Failed", url: "" },
+      { label: "Feedback", match: "Feedback", url: "" },
+    ],
+  };
+}
+
+// Fills in any bins missing from a saved config (e.g. "Failed" added after
+// someone already configured their board) without touching what they've
+// already set up for the others.
+function normalizeOptions(saved) {
+  const base = saved && Array.isArray(saved.bins) && saved.bins.length ? saved : defaultOptions();
+  const haveLabels = new Set(base.bins.map((b) => normalizeKey(b.label)));
+  const bins = base.bins.concat(defaultOptions().bins.filter((b) => !haveLabels.has(normalizeKey(b.label))));
+  return { ...base, bins };
+}
+
+// ========== SCHEMA / METADATA ==========
+async function loadSchema() {
+  const cols = await grist.docApi.fetchTable("_grist_Tables_column");
+  const tabs = await grist.docApi.fetchTable("_grist_Tables");
+
+  const tableById = {};
+  (tabs.id || []).forEach((id, i) => { tableById[id] = tabs.tableId[i]; });
+
+  const colMetaById = {};
+  const colMetaByParentAndColId = {};
+  (cols.id || []).forEach((id, i) => {
+    const meta = {
+      id,
+      colId: cols.colId[i],
+      parentId: cols.parentId[i],
+      type: cols.type[i],
+      label: cols.label[i] || cols.colId[i],
+      visibleCol: cols.visibleCol[i],
+      widgetOptions: cols.widgetOptions[i],
+    };
+    colMetaById[id] = meta;
+    colMetaByParentAndColId[`${meta.parentId}:${meta.colId}`] = meta;
+  });
+
+  return { tableById, colMetaById, colMetaByParentAndColId };
+}
+
+function findParentRowId(schema, tableId) {
+  for (const [rowId, tid] of Object.entries(schema.tableById)) {
+    if (tid === tableId) return Number(rowId);
+  }
+  return null;
+}
+
+function colMetaFor(colId) {
+  if (!state.schema || !state.tableId || !colId) return null;
+  const parentRowId = findParentRowId(state.schema, state.tableId);
+  if (parentRowId == null) return null;
+  return state.schema.colMetaByParentAndColId[`${parentRowId}:${colId}`] || null;
+}
+
+// Loads (and caches) a referenced table's rows so Ref/RefList fields can be
+// displayed and offered as dropdown choices.
+async function ensureRefCache(tableId, visibleColRowId) {
+  if (!tableId) return null;
+  if (state.refCache[tableId]) return state.refCache[tableId];
+
+  const promise = (async () => {
+    const visibleMeta = visibleColRowId ? state.schema?.colMetaById[visibleColRowId] : null;
+    const visibleColId = visibleMeta?.colId;
+    const data = await grist.docApi.fetchTable(tableId);
+    const ids = data.id || [];
+    const labelSource = visibleColId && data[visibleColId] ? data[visibleColId] : null;
+    const idToLabel = {};
+    const options = ids.map((id, i) => {
+      let raw = labelSource ? labelSource[i] : id;
+      let label = Array.isArray(raw) ? String(raw[raw.length - 1]) : String(raw ?? id);
+      idToLabel[id] = label;
+      return { id, label };
+    });
+    options.sort((a, b) => a.label.localeCompare(b.label));
+    return { idToLabel, options };
+  })();
+
+  state.refCache[tableId] = promise;
+  // Some hosts (nested/relayed widget frames in particular) can leave a
+  // docApi call neither resolved nor rejected instead of failing outright —
+  // a plain try/catch around the fetch does nothing for that, since a hang
+  // never throws. Race it against a timeout so a stuck cross-table fetch
+  // still degrades instead of leaving the render permanently stuck waiting.
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("timed out fetching table " + tableId)), 10000)
+  );
+  try {
+    const resolved = await Promise.race([promise, timeout]);
+    state.refCache[tableId] = resolved;
+    return resolved;
+  } catch (e) {
+    // A failed fetch (permissions, a transient error, whatever the host
+    // environment does with cross-table docApi calls) must not get stuck as
+    // a permanently-rejected cache entry — every future caller here would
+    // immediately re-throw it too, taking the whole board/popup render down
+    // with it forever. Drop the cache entry so the next render retries, and
+    // hand back an empty-but-valid cache so this render just shows raw ids
+    // for that field instead of failing outright.
+    console.error("Error fetching referenced table " + tableId + ":", e);
+    delete state.refCache[tableId];
+    return { idToLabel: {}, options: [] };
+  }
+}
+
+function invalidateRefCache() {
+  state.refCache = {};
+}
+
+// loadSchema does a couple of docApi round trips; onRecords, an initial
+// schema-load IIFE, and the "message" handler can all want it around the
+// same time on startup. Share one in-flight fetch instead of firing it
+// redundantly from each — seen in practice tripling the _grist_Tables*
+// fetches on a single load.
+let schemaPromise = null;
+function loadSchemaOnce() {
+  if (!schemaPromise) schemaPromise = loadSchema();
+  return schemaPromise;
+}
+function invalidateSchema() {
+  schemaPromise = null;
+}
+
+// Board renders can now await real cross-table fetches (ensureRefCache), so
+// overlapping triggers (onRecords, the initial schema load, a later
+// mappingsChange) are no longer instantaneous no-ops the way they were when
+// renderBoard was synchronous in practice — queue them instead of letting
+// them run concurrently against the same #board DOM.
+let renderBoardChain = Promise.resolve();
+function scheduleRenderBoard() {
+  renderBoardChain = renderBoardChain.then(() => renderBoard()).catch((e) => console.error("renderBoard failed:", e));
+  return renderBoardChain;
+}
+
+// ========== UNDO ==========
+// Tracks the last several field/status edits *this widget* made (not task
+// creation or deletion — creation is undoable by just deleting the row
+// yourself, and deletion isn't safely reversible from here) so Ctrl+Z can
+// step back through them. Grist's own document-level undo doesn't reach
+// this: keydown events inside this widget's iframe never bubble up to the
+// top-level app that owns the real undo stack.
+const undoStack = [];
+const UNDO_LIMIT = 20;
+
+function pushUndo(rowId, colId, previousValue) {
+  if (!rowId || !colId) return;
+  undoStack.push({ rowId, colId, previousValue });
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+}
+
+async function undoLastChange() {
+  const entry = undoStack.pop();
+  if (!entry) {
+    showToast("Nothing to undo");
+    return;
+  }
+  try {
+    await grist.getTable().update({ id: Number(entry.rowId), fields: { [entry.colId]: entry.previousValue } });
+    showToast("Undid last change");
+  } catch (e) {
+    console.error("Error undoing change:", e);
+    showToast("Could not undo: " + e.message);
+  }
+}
+
+function isEditingText(el) {
+  return !!(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable));
+}
+
+// ========== INIT ==========
+window.addEventListener("load", () => {
+  grist.ready({
+    requiredAccess: "full",
+    allowSelectBy: true,
+    columns: [
+      { name: MAP.title, title: "Title", optional: false },
+      { name: MAP.status, title: "Status", description: "Defines the board columns", type: "Choice", strictType: true, optional: false },
+      { name: MAP.location, title: "Location", optional: true },
+      { name: MAP.team, title: "Team", optional: true },
+      { name: MAP.priority, title: "Priority", optional: true },
+      {
+        name: MAP.extra,
+        title: "Additional fields",
+        description: "Map any extra columns here to show them as editable fields in the task popup. Add or remove columns to change what's shown — text, date, choice, reference and attachment columns are all supported.",
+        optional: true,
+        allowMultiple: true,
+      },
+      {
+        name: MAP.readonlyExtra,
+        title: "Read-only fields",
+        description: "Map columns here to show them in the task popup as read-only info — e.g. Modified date, Modified by, Created by, Reported by. These are never editable from the popup.",
+        optional: true,
+        allowMultiple: true,
+      },
+    ],
+  });
+
+  grist.onOptions((options) => {
+    state.options = normalizeOptions(options);
+    renderBins();
+    // Bin match values decide which Status choices are excluded from the
+    // board (see binMatches/statusGroups) — a config save changes that set,
+    // so the board itself needs to catch up, not just the bin pills.
+    scheduleRenderBoard();
+  });
+
+  grist.onRecords(async (records, mappings) => {
+    state.mappings = mappings || {};
+    state.records = grist.mapColumnNames(records, { mappings }) || [];
+    try {
+      state.tableId = await grist.getTable().getTableId();
+    } catch (e) {
+      state.tableId = null;
+    }
+    scheduleRenderBoard();
+    renderBins();
+    refreshOpenPopupIfIdle();
+  }, { keepEncoded: true });
+
+  grist.on("message", async (e) => {
+    // Grist's TableNotifier stamps *every* row-data notification with a
+    // tableId — any row edit, any cursor move, any sort change, including
+    // ones this widget's own field-save calls trigger — not just an actual
+    // rebind to a different table. Treating its mere presence as "the table
+    // changed" meant almost any activity re-invalidated the ref cache and
+    // schema and restarted the whole cross-table fetch cycle before the
+    // previous one could finish and stay on screen. A genuine table switch
+    // is already handled by onRecords (which updates state.tableId and
+    // re-renders), so only mappingsChange — an actual mapping edit — needs
+    // to trigger a fresh reload here.
+    if (e.mappingsChange) {
+      invalidateRefCache();
+      invalidateSchema();
+      state.schema = await loadSchemaOnce();
+      scheduleRenderBoard();
+      renderBins();
+    }
+  });
+
+  // onRecords can render the board before this resolves, since loadSchema is
+  // a couple of docApi round trips racing against Grist's own record push —
+  // re-render once schema is actually in so colMetaFor-dependent bits
+  // (choice colors, ref labels) aren't stuck on their no-metadata fallback
+  // until some later, unrelated update. loadSchemaOnce/scheduleRenderBoard
+  // (below) keep this from compounding into redundant concurrent fetches
+  // when "message" also fires its own schema reload around the same time.
+  (async () => {
+    state.schema = await loadSchemaOnce();
+    scheduleRenderBoard();
+    renderBins();
+  })();
+
+  document.getElementById("overlay").addEventListener("click", closePopup);
+  document.querySelector(".popup-close").addEventListener("click", closePopup);
+  document.getElementById("lightbox").addEventListener("click", closeLightbox);
+  document.getElementById("config-open-btn").addEventListener("click", openConfig);
+  document.getElementById("config-overlay").addEventListener("click", closeConfig);
+  document.getElementById("config-close-btn").addEventListener("click", closeConfig);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (document.getElementById("lightbox").classList.contains("visible")) closeLightbox();
+      else if (document.getElementById("config-panel").classList.contains("visible")) closeConfig();
+      else closePopup();
+      return;
+    }
+    // Ctrl+Z / Cmd+Z. Skipped while actively typing in a field so the
+    // browser's own native undo-within-that-input still works as expected —
+    // this only steps back through already-saved changes.
+    const isUndoCombo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z";
+    if (isUndoCombo && !isEditingText(document.activeElement)) {
+      e.preventDefault();
+      undoLastChange();
+    }
+  });
+
+  // A single popup-wide paste listener, rather than one per open() call —
+  // it just no-ops unless a task is open and an attachment field is "active".
+  document.getElementById("popup").addEventListener("paste", async (e) => {
+    if (!state.popupRecordId || !state.activeAttachment) return;
+    const items = e.clipboardData?.items || [];
+    const files = [];
+    for (const item of items) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (!files.length) return;
+    e.preventDefault();
+    const { colId, fieldEl } = state.activeAttachment;
+    await appendAttachments(state.popupRecordId, colId, files, fieldEl);
+  });
+});
+
+// ========== BOARD RENDERING ==========
+function statusMeta() {
+  return colMetaFor(state.mappings[MAP.status]);
+}
+
+function binMatches() {
+  const opts = state.options || defaultOptions();
+  return (opts.bins || []).map((b) => normalizeKey(b.match || b.label));
+}
+
+// Maps each configured Priority choice label to its position in the
+// column's own configured order, so cards can be sorted to match — same
+// order the Priority dropdown itself shows them in.
+function priorityOrderIndex() {
+  const meta = colMetaFor(state.mappings[MAP.priority]);
+  const entries = meta ? parseChoiceEntries(meta.widgetOptions) : [];
+  const index = new Map();
+  entries.forEach((e, i) => {
+    if (e.label) index.set(normalizeKey(e.label), i);
+  });
+  return index;
+}
+
+function statusGroups() {
+  const meta = statusMeta();
+  const entries = meta ? parseChoiceEntries(meta.widgetOptions) : [];
+  const order = entries.map((e) => e.label).filter(Boolean);
+  const excluded = new Set(binMatches());
+
+  const groups = new Map();
+  for (const label of order) {
+    if (excluded.has(normalizeKey(label))) continue;
+    groups.set(label, []);
+  }
+
+  for (const rec of state.records) {
+    const label = String(rec[MAP.status] ?? "").trim();
+    if (!label || excluded.has(normalizeKey(label))) continue;
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(rec);
+  }
+
+  // Sort each column's cards to match the Priority choice order (unlisted
+  // or blank priorities sink to the end, stable otherwise so ties keep
+  // their existing relative order).
+  const priorityIndex = priorityOrderIndex();
+  if (priorityIndex.size) {
+    const rank = (rec) => {
+      const idx = priorityIndex.get(normalizeKey(rec[MAP.priority]));
+      return idx == null ? Infinity : idx;
+    };
+    for (const records of groups.values()) records.sort((a, b) => rank(a) - rank(b));
+  }
+
+  return { groups, choiceEntries: entries };
+}
+
+function binCounts() {
+  const matches = binMatches();
+  const counts = matches.map(() => 0);
+  for (const rec of state.records) {
+    const label = normalizeKey(rec[MAP.status]);
+    const idx = matches.indexOf(label);
+    if (idx >= 0) counts[idx] += 1;
+  }
+  return counts;
+}
+
+// Cards show Location/Team/Priority as plain text, but a Ref/RefList value
+// there is a row id (or a keepEncoded tuple), not something worth printing
+// as-is — resolve it against the referenced table's cached labels first, the
+// same cache buildRefField uses in the popup. Requires that cache to already
+// be populated (see prefetchCardRefCaches), since buildCard itself is sync.
+function cardFieldText(colId, rawValue) {
+  const meta = colMetaFor(colId);
+  const bt = meta ? baseType(meta.type) : "Text";
+  if (bt !== "Ref" && bt !== "RefList") return String(rawValue ?? "");
+
+  const tableId = refTableOf(meta.type);
+  const cache = state.refCache[tableId];
+  const idToLabel = cache && cache.idToLabel;
+
+  // A column-mapping slot that doesn't declare a strict `type: "Ref"` (true
+  // of every slot in this widget's ready() config) gets handed the
+  // already-resolved display text directly, not a raw row id — confirmed
+  // empirically: the value here is a plain string like "Warehouse", and
+  // decodeRef(...) on that is NaN -> 0, which used to read as "unset" and
+  // render blank. Only fall back to id lookup when the value truly decodes
+  // to a usable id; otherwise it's already the text to show.
+  const resolveOne = (v) => {
+    const id = decodeRef(v);
+    if (id && idToLabel && idToLabel[id] != null) return idToLabel[id];
+    if (typeof v === "string") return v;
+    return v == null ? "" : String(v);
+  };
+
+  if (bt === "Ref") return resolveOne(rawValue);
+  const rawList = Array.isArray(rawValue) ? rawValue : decodeList(rawValue);
+  return rawList.map(resolveOne).join(", ");
+}
+
+// Warms state.refCache for any of the card's fixed fields that are Ref/RefList
+// columns, so cardFieldText can resolve labels synchronously once cards are
+// actually built below.
+async function prefetchCardRefCaches() {
+  for (const key of ["location", "team", "priority"]) {
+    const colId = state.mappings[MAP[key]];
+    if (!colId) continue;
+    const meta = colMetaFor(colId);
+    const bt = meta ? baseType(meta.type) : null;
+    if (bt === "Ref" || bt === "RefList") {
+      await ensureRefCache(refTableOf(meta.type), meta.visibleCol);
+    }
+  }
+}
+
+async function renderBoard() {
+  const board = document.getElementById("board");
+
+  if (!state.mappings[MAP.title] || !state.mappings[MAP.status]) {
+    board.innerHTML = '<div class="section-empty" style="padding:2rem;">Map a Title and Status column in the widget options to get started.</div>';
+    return;
+  }
+
+  await prefetchCardRefCaches();
+
+  const { groups, choiceEntries } = statusGroups();
+
+  let html = "";
+  for (const [label, records] of groups) {
+    const color = choiceFillColor(choiceEntries, label) || "";
+    html += `
+      <div class="section" data-status="${escapeHtml(label)}">
+        <div class="section-header" style="--col-color:${escapeHtml(color)}">
+          <span class="section-title">${escapeHtml(label)}<span class="section-count">${records.length}</span></span>
+          <button class="section-add-btn" data-add-status="${escapeHtml(label)}" title="Add task" type="button">+</button>
+        </div>
+        <div class="section-body" data-status="${escapeHtml(label)}">
+          ${records.length ? "" : '<div class="section-empty">No tasks</div>'}
+        </div>
+      </div>`;
+  }
+  board.innerHTML = html;
+
+  for (const [label, records] of groups) {
+    const body = board.querySelector(`.section-body[data-status="${cssEscape(label)}"]`);
+    if (!body) continue;
+    for (const rec of records) body.appendChild(buildCard(rec));
+  }
+
+  board.querySelectorAll(".section-add-btn").forEach((btn) => {
+    btn.addEventListener("click", () => createTask(btn.dataset.addStatus));
+  });
+
+  setupDragAndDrop(board);
+}
+
+function cssEscape(s) {
+  return String(s).replace(/["\\]/g, "\\$&");
+}
+
+function buildCard(rec) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.dataset.taskId = rec.id;
+
+  const title = escapeHtml(String(rec[MAP.title] ?? "") || "Untitled task");
+  const priority = cardFieldText(state.mappings[MAP.priority], rec[MAP.priority]).trim();
+  const location = cardFieldText(state.mappings[MAP.location], rec[MAP.location]).trim();
+  const team = cardFieldText(state.mappings[MAP.team], rec[MAP.team]).trim();
+
+  const priorityMeta = colMetaFor(state.mappings[MAP.priority]);
+  const priorityColor = priorityMeta ? choiceFillColor(parseChoiceEntries(priorityMeta.widgetOptions), priority) : null;
+
+  card.innerHTML = `
+    ${(priority || team) ? `<div class="card-badges">
+      ${priority ? `<span class="card-priority" style="${priorityColor ? "background:" + escapeHtml(priorityColor) + ";" : ""}">${escapeHtml(priority)}</span>` : ""}
+      ${team ? `<span class="card-team">${escapeHtml(team)}</span>` : ""}
+    </div>` : ""}
+    <p class="card-title">${title}</p>
+    <div class="card-meta">
+      ${location ? `<span>\u{1F4CD} ${escapeHtml(location)}</span>` : ""}
+    </div>
+  `;
+
+  card.addEventListener("click", () => {
+    grist.setCursorPos({ rowId: rec.id });
+    openPopup(rec.id);
+  });
+
+  return card;
+}
+
+// ========== DRAG & DROP ==========
+let sortableInstances = [];
+
+// Bins are a drop *zone* outside #board entirely, not a Sortable list —
+// making them actual Sortable targets (as this used to) meant SortableJS
+// inserted the dragged card into the bin's own DOM as a live preview,
+// ballooning the bin and letting it land between the label and count.
+// Sortable's onMove only fires for hover over containers IT manages, so it
+// never sees the pointer once it's over a bin — hence no highlight and the
+// browser's native "not allowed" cursor over an unmanaged drop area. Native
+// dragover/drop listeners on the bins themselves (wired in renderBins) fix
+// both: preventDefault() in dragover clears the denied cursor, and the
+// class toggle there drives the highlight.
+let draggedTaskId = null;
+
+function setBinHighlight(bin) {
+  document.querySelectorAll(".bin.drag-over").forEach((el) => {
+    if (el !== bin) el.classList.remove("drag-over");
+  });
+  if (bin) bin.classList.add("drag-over");
+}
+
+function clearBinHighlight() {
+  document.querySelectorAll(".bin.drag-over").forEach((el) => el.classList.remove("drag-over"));
+}
+
+function setupDragAndDrop(board) {
+  sortableInstances.forEach((s) => s.destroy());
+  sortableInstances = [];
+  clearBinHighlight();
+  draggedTaskId = null;
+
+  if (isMobile()) return;
+
+  board.querySelectorAll(".section-body").forEach((body) => {
+    sortableInstances.push(new Sortable(body, {
+      group: "task-board",
+      animation: 150,
+      filter: ".section-empty", // the "No tasks" placeholder isn't a card
+      sort: false, // cards are always shown in priority order now, so
+      // reordering within a status column would mean nothing — Sortable
+      // just won't let a same-list drag reorder it in the first place.
+      onStart: (evt) => {
+        draggedTaskId = evt.item.dataset.taskId;
+      },
+      onMove: (evt) => {
+        // Hide the "No tasks" placeholder the moment a card is dragged
+        // over an empty column, instead of leaving it to shuffle around as
+        // a fake sort target until drop.
+        const emptyEl = evt.to.querySelector(".section-empty");
+        if (emptyEl) emptyEl.style.display = "none";
+        return true;
+      },
+      onEnd: (evt) => {
+        draggedTaskId = null;
+        clearBinHighlight();
+        // Anything left showing "No tasks" that we hid mid-drag but that
+        // never actually received a card needs it back.
+        board.querySelectorAll(".section-body").forEach((body) => {
+          const emptyEl = body.querySelector(".section-empty");
+          if (emptyEl && !body.querySelector(".card")) emptyEl.style.display = "";
+        });
+        const newStatus = evt.to.dataset.status;
+        const oldStatus = evt.from.dataset.status;
+        if (newStatus !== oldStatus) {
+          setStatus(evt.item.dataset.taskId, newStatus);
+        }
+      },
+    }));
+  });
+}
+
+async function setStatus(rowId, statusValue) {
+  const statusColId = state.mappings[MAP.status];
+  const previousValue = findRecord(rowId)?.[MAP.status];
+  try {
+    await grist.getTable().update({ id: Number(rowId), fields: { [statusColId]: statusValue } });
+    pushUndo(rowId, statusColId, previousValue);
+  } catch (e) {
+    console.error("Error updating status:", e);
+    showToast("Could not update status: " + e.message);
+  }
+}
+
+// ========== BINS ==========
+function renderBins() {
+  const bins = document.getElementById("bins");
+  const config = state.options || defaultOptions();
+  const counts = binCounts();
+
+  bins.innerHTML = config.bins.map((bin, i) => `
+    <div class="bin" data-match="${escapeHtml(bin.match || bin.label)}" data-url="${escapeHtml(bin.url || "")}" title="${escapeHtml(bin.label)}">
+      <span class="bin-label">${escapeHtml(bin.label)}</span>
+      <span class="bin-count">${counts[i] || 0}</span>
+    </div>
+  `).join("");
+
+  bins.querySelectorAll(".bin").forEach((el) => {
+    el.addEventListener("click", () => {
+      const url = el.dataset.url;
+      if (url) window.open(url, "_blank", "noopener");
+      else showToast("No link configured for this bin yet — set one in the widget options.");
+    });
+
+    // Native drag events, not Sortable — see the comment above
+    // setupDragAndDrop for why bins are handled this way. preventDefault()
+    // in dragover is what tells the browser this IS a valid drop target
+    // (clearing the "not allowed" cursor); only react while one of our own
+    // cards is actually being dragged (draggedTaskId set in onStart).
+    el.addEventListener("dragover", (e) => {
+      if (!draggedTaskId) return;
+      e.preventDefault();
+      setBinHighlight(el);
+    });
+    el.addEventListener("drop", (e) => {
+      if (!draggedTaskId) return;
+      e.preventDefault();
+      setStatus(draggedTaskId, el.dataset.match);
+    });
+  });
+
+  if (!isMobile()) setupDragAndDrop(document.getElementById("board"));
+}
+
+window.addEventListener("resize", () => {
+  setupDragAndDrop(document.getElementById("board"));
+});
+
+// ========== CONFIG (BOARD SETTINGS) ==========
+// Bins are stored as this widget's own option ("bins"), alongside whatever
+// keys the surrounding Custom Widget Builder keeps in the same options
+// object (its saved code, etc). grist.setOption(key, value) patches just
+// this one key — grist.setOptions(wholeObject) would replace the entire
+// options object and wipe that other stuff out, so it's never used here.
+function openConfig() {
+  renderConfigForm();
+  document.getElementById("config-panel").classList.add("visible");
+  document.getElementById("config-overlay").classList.add("visible");
+}
+
+function closeConfig() {
+  document.getElementById("config-panel").classList.remove("visible");
+  document.getElementById("config-overlay").classList.remove("visible");
+}
+
+function buildConfigBinRow(bin) {
+  return `
+    <div class="config-bin-row">
+      <div class="field">
+        <label class="field-label">Label</label>
+        <input class="field-input" data-bin-field="label" value="${escapeHtml(bin.label || "")}">
+      </div>
+      <div class="field">
+        <label class="field-label">Status value to match</label>
+        <input class="field-input" data-bin-field="match" value="${escapeHtml(bin.match || "")}">
+      </div>
+      <div class="field">
+        <label class="field-label">Link URL (optional)</label>
+        <input class="field-input" data-bin-field="url" value="${escapeHtml(bin.url || "")}">
+      </div>
+      <button type="button" class="btn config-bin-remove">Remove bin</button>
+    </div>`;
+}
+
+function wireConfigBinRow(row) {
+  row.querySelector(".config-bin-remove").addEventListener("click", () => row.remove());
+}
+
+function renderConfigForm() {
+  const body = document.getElementById("config-body");
+  const opts = state.options || defaultOptions();
+
+  body.innerHTML = `
+    <p class="config-hint">Bins are quick-access pills shown in the toolbar (desktop only) for statuses you'd rather keep off the board, like Completed or Cancelled. "Status value to match" is compared against the Status column (case-insensitive); the optional link opens when a bin is clicked rather than dragged onto.</p>
+    <div id="config-bin-list">${opts.bins.map((b) => buildConfigBinRow(b)).join("")}</div>
+    <button type="button" class="btn" id="config-add-bin">+ Add bin</button>
+    <div class="config-actions">
+      <button type="button" class="btn" id="config-cancel-btn">Cancel</button>
+      <button type="button" class="btn primary" id="config-save-btn">Save</button>
+    </div>`;
+
+  body.querySelectorAll(".config-bin-row").forEach(wireConfigBinRow);
+
+  document.getElementById("config-add-bin").addEventListener("click", () => {
+    const list = document.getElementById("config-bin-list");
+    list.insertAdjacentHTML("beforeend", buildConfigBinRow({ label: "", match: "", url: "" }));
+    wireConfigBinRow(list.lastElementChild);
+  });
+
+  document.getElementById("config-cancel-btn").addEventListener("click", closeConfig);
+  document.getElementById("config-save-btn").addEventListener("click", saveConfigForm);
+}
+
+async function saveConfigForm() {
+  const bins = Array.from(document.querySelectorAll(".config-bin-row"))
+    .map((row) => ({
+      label: row.querySelector('[data-bin-field="label"]').value.trim(),
+      match: row.querySelector('[data-bin-field="match"]').value.trim(),
+      url: row.querySelector('[data-bin-field="url"]').value.trim(),
+    }))
+    .filter((b) => b.label);
+
+  try {
+    await grist.setOption("bins", bins);
+    showToast("Board settings saved");
+    closeConfig();
+  } catch (e) {
+    // Grist enforces document permissions server-side regardless of what
+    // this widget tries — a Viewer (or an Editor without access to this
+    // table) gets this rejected here rather than it silently going through.
+    console.error("Error saving board settings:", e);
+    showToast("Could not save board settings: " + e.message);
+  }
+}
+
+// ========== TASK CREATE / DELETE ==========
+async function createTask(statusValue) {
+  try {
+    const fields = { [state.mappings[MAP.title]]: "", [state.mappings[MAP.status]]: statusValue };
+    const res = await grist.getTable().create({ fields });
+    const id = Array.isArray(res) ? res[0]?.id : res?.id;
+    if (id) {
+      grist.setCursorPos({ rowId: id });
+      // onRecords for this new row hasn't necessarily arrived yet, so
+      // findRecord(id) inside openPopup would come up empty and openPopup
+      // would silently no-op. Seed a placeholder with the fields we just
+      // set so the popup can open immediately; the real onRecords update
+      // (see the live popup refresh in onRecords) replaces it with the
+      // authoritative record moments later.
+      if (!findRecord(id)) {
+        state.records.push({ id, [MAP.title]: "", [MAP.status]: statusValue });
+      }
+      openPopup(id);
+    }
+  } catch (e) {
+    console.error("Error creating task:", e);
+    showToast("Could not create task: " + e.message);
+  }
+}
+
+async function deleteTask(rowId) {
+  if (!confirm("Delete this task?")) return;
+  try {
+    await grist.getTable().destroy(Number(rowId));
+    closePopup();
+  } catch (e) {
+    console.error("Error deleting task:", e);
+    showToast("Could not delete task: " + e.message);
+  }
+}
+
+// ========== POPUP EDITOR ==========
+function findRecord(rowId) {
+  return state.records.find((r) => String(r.id) === String(rowId));
+}
+
+// Grist's mapping for an allowMultiple slot (state.mappings[mapKey], and
+// the matching rec[mapKey] value) is a bare colId/value rather than a
+// single-element array whenever exactly one column is mapped to it — the
+// widget API's WidgetColumnMap type is `string | string[] | null`, not
+// always an array. [].concat(...) can't wrap that safely: it splices arrays
+// instead of wrapping them, so a lone value that's itself array-shaped
+// (RefList, Attachments, ChoiceList, Date/DateTime under keepEncoded) gets
+// its tag/elements spread out as if they were separate mapped columns. Branch
+// on the *mapping's* shape instead, and mirror the same shape for the values.
+// Shared by both allowMultiple slots (the editable "Additional fields" and
+// the read-only fields).
+function mappedColsAndVals(rec, mapKey) {
+  const mapping = state.mappings[mapKey];
+  if (mapping == null) return { cols: [], vals: [] };
+  if (Array.isArray(mapping)) return { cols: mapping, vals: rec[mapKey] == null ? [] : rec[mapKey] };
+  return { cols: [mapping], vals: [rec[mapKey]] };
+}
+
+// Finds the raw value for a *real* Grist column id, regardless of which
+// mapping slot (a fixed one, or one of the allowMultiple EXTRA columns) it
+// was mapped through. Needed when mutating attachments, where we only know
+// the column id, not which slot it came from.
+function getRawValueForCol(rec, colId) {
+  for (const key of ["title", "status", "location", "team", "priority"]) {
+    if (state.mappings[MAP[key]] === colId) return rec[MAP[key]];
+  }
+  const { cols: extraCols, vals: extraVals } = mappedColsAndVals(rec, MAP.extra);
+  const idx = extraCols.indexOf(colId);
+  return idx >= 0 ? extraVals[idx] : undefined;
+}
+
+// If the popup is open and the record it's showing gets new data (another
+// collaborator's edit, an automation, or our own optimistic createTask
+// placeholder being replaced by the real record), refresh it to match — but
+// never while a field inside it currently has focus, since a full re-render
+// would wipe out whatever the user is mid-typing before it's saved.
+function refreshOpenPopupIfIdle() {
+  if (state.popupRecordId == null) return;
+  const popupBody = document.querySelector("#popup .popup-body");
+  const active = document.activeElement;
+  if (popupBody && active && popupBody.contains(active)) return;
+  openPopup(state.popupRecordId);
+}
+
+async function openPopup(rowId) {
+  const rec = findRecord(rowId);
+  if (!rec) return;
+  state.popupRecordId = rowId;
+  state.activeAttachment = null;
+
+  const popup = document.getElementById("popup");
+  const overlay = document.getElementById("overlay");
+  const titleEl = popup.querySelector(".popup-title");
+  const body = popup.querySelector(".popup-body");
+
+  const meta = statusMeta();
+  const statusVal = String(rec[MAP.status] ?? "");
+  const statusColor = meta ? choiceFillColor(parseChoiceEntries(meta.widgetOptions), statusVal) : null;
+  popup.style.setProperty("--col-color", statusColor || "");
+
+  titleEl.textContent = String(rec[MAP.title] ?? "") || "New task";
+
+  let html = "";
+  html += buildTextareaField(state.mappings[MAP.title], "Title", rec[MAP.title]);
+  html += buildStatusField(rec);
+  if (state.mappings[MAP.location]) html += await buildGenericField(state.mappings[MAP.location], "Location", rec[MAP.location]);
+  if (state.mappings[MAP.team]) html += await buildGenericField(state.mappings[MAP.team], "Team", rec[MAP.team]);
+  if (state.mappings[MAP.priority]) html += await buildGenericField(state.mappings[MAP.priority], "Priority", rec[MAP.priority]);
+
+  const { cols: extraCols, vals: extraVals } = mappedColsAndVals(rec, MAP.extra);
+  for (let i = 0; i < extraCols.length; i++) {
+    const colId = extraCols[i];
+    const colMeta = colMetaFor(colId);
+    html += await buildGenericField(colId, colMeta?.label || colId, extraVals[i]);
+  }
+
+  const { cols: readonlyCols, vals: readonlyVals } = mappedColsAndVals(rec, MAP.readonlyExtra);
+  for (let i = 0; i < readonlyCols.length; i++) {
+    const colId = readonlyCols[i];
+    const colMeta = colMetaFor(colId);
+    html += buildReadOnlyField(colId, colMeta?.label || colId, readonlyVals[i]);
+  }
+
+  html += `<div class="popup-actions"><button class="popup-delete" type="button" id="popup-delete-btn" title="Delete task">\u{1F5D1}️</button></div>`;
+
+  body.innerHTML = html;
+  wireFieldEvents(body, rowId);
+  document.getElementById("popup-delete-btn").addEventListener("click", () => deleteTask(rowId));
+
+  popup.classList.add("visible");
+  overlay.classList.add("visible");
+}
+
+function closePopup() {
+  document.getElementById("popup").classList.remove("visible");
+  document.getElementById("overlay").classList.remove("visible");
+  state.popupRecordId = null;
+  state.activeAttachment = null;
+}
+
+function buildTextareaField(colId, label, value) {
+  if (!colId) return "";
+  return `
+    <div class="field">
+      <label class="field-label">${escapeHtml(label)}</label>
+      <textarea class="field-textarea" data-col-id="${escapeHtml(colId)}">${escapeHtml(value ?? "")}</textarea>
+    </div>`;
+}
+
+function buildTextField(colId, label, value) {
+  return `
+    <div class="field">
+      <label class="field-label">${escapeHtml(label)}</label>
+      <input type="text" class="field-input" data-col-id="${escapeHtml(colId)}" value="${escapeHtml(value ?? "")}">
+    </div>`;
+}
+
+// Status gets its own builder: its option list is the union of the column's
+// configured choices (the board's own status columns) plus whatever the
+// bins are configured to match — so a phone user with no drag-and-drop can
+// still move a task straight to "Completed" from this dropdown.
+function buildStatusField(rec) {
+  const colId = state.mappings[MAP.status];
+  if (!colId) return "";
+  const meta = statusMeta();
+  const entries = meta ? parseChoiceEntries(meta.widgetOptions) : [];
+  const order = entries.map((e) => e.label).filter(Boolean);
+  const opts = state.options || defaultOptions();
+  const bins = opts.bins.map((b) => b.match || b.label);
+  const all = Array.from(new Set([...order, ...bins]));
+  const current = String(rec[MAP.status] ?? "");
+  if (current && !all.includes(current)) all.push(current);
+
+  const optionsHtml = `<option value=""></option>` + all
+    .map((v) => `<option value="${escapeHtml(v)}" ${v === current ? "selected" : ""}>${escapeHtml(v)}</option>`)
+    .join("");
+  return `
+    <div class="field">
+      <label class="field-label">Status</label>
+      <select class="field-select" data-col-id="${escapeHtml(colId)}">${optionsHtml}</select>
+    </div>`;
+}
+
+function buildChoiceField(colId, label, rawValue, meta, multiple) {
+  const entries = parseChoiceEntries(meta?.widgetOptions);
+  const choices = entries.map((e) => e.label).filter(Boolean);
+  if (!choices.length) {
+    return buildTextField(colId, label, multiple ? decodeList(rawValue).join(", ") : rawValue);
+  }
+  const current = multiple ? decodeList(rawValue).map(String) : [String(rawValue ?? "")];
+  const optionsHtml = choices
+    .map((c) => `<option value="${escapeHtml(c)}" ${current.includes(c) ? "selected" : ""}>${escapeHtml(c)}</option>`)
+    .join("");
+  return `
+    <div class="field">
+      <label class="field-label">${escapeHtml(label)}</label>
+      <select class="field-select" data-col-id="${escapeHtml(colId)}" data-choice-list="${multiple ? "1" : "0"}" ${multiple ? "multiple" : ""}>
+        ${multiple ? "" : '<option value=""></option>'}${optionsHtml}
+      </select>
+    </div>`;
+}
+
+function buildDateField(colId, label, rawValue, withTime) {
+  const epoch = decodeDateValue(rawValue);
+  const value = withTime ? dateTimeInputValue(epoch) : dateInputValue(epoch);
+  return `
+    <div class="field">
+      <label class="field-label">${escapeHtml(label)}</label>
+      <input type="${withTime ? "datetime-local" : "date"}" class="field-input" data-col-id="${escapeHtml(colId)}" data-date-type="${withTime ? "datetime" : "date"}" value="${value}">
+    </div>`;
+}
+
+function buildBoolField(colId, label, value) {
+  return `
+    <div class="field">
+      <label class="field-label">${escapeHtml(label)}</label>
+      <div class="field-checkbox-row">
+        <input type="checkbox" data-col-id="${escapeHtml(colId)}" data-bool="1" ${value ? "checked" : ""}>
+      </div>
+    </div>`;
+}
+
+async function buildRefField(colId, label, rawValue, multiple, meta) {
+  const tableId = refTableOf(meta.type);
+  const cache = await ensureRefCache(tableId, meta.visibleCol);
+  const options = cache?.options || [];
+
+  // Same story as cardFieldText: an untyped mapping slot (every slot this
+  // widget declares) hands back the already-resolved display text rather
+  // than a raw row id, so the current value may show up here as a string
+  // ("Warehouse") instead of a decodable id. Match on whichever form the
+  // value actually takes rather than assuming one, so the current
+  // selection is still recognized either way.
+  const rawList = multiple ? (Array.isArray(rawValue) ? rawValue : decodeList(rawValue)) : [rawValue];
+  const currentIds = new Set(rawList.map(decodeRef).filter(Boolean));
+  const currentLabels = new Set(rawList.filter((v) => typeof v === "string" && v !== ""));
+
+  const optionsHtml = options
+    .map((o) => `<option value="${o.id}" ${(currentIds.has(o.id) || currentLabels.has(o.label)) ? "selected" : ""}>${escapeHtml(o.label)}</option>`)
+    .join("");
+  return `
+    <div class="field">
+      <label class="field-label">${escapeHtml(label)}</label>
+      <select class="field-select" data-col-id="${escapeHtml(colId)}" data-ref-list="${multiple ? "1" : "0"}" ${multiple ? "multiple" : ""}>
+        ${multiple ? "" : '<option value="0"></option>'}${optionsHtml}
+      </select>
+    </div>`;
+}
+
+async function buildAttachmentField(colId, label, rawValue) {
+  const ids = decodeList(rawValue).map(Number);
+  const token = await ensureAccessToken();
+  const items = ids.map((id) => attachmentThumbHtml(token, id)).join("");
+
+  return `
+    <div class="field attachment-field" data-col-id="${escapeHtml(colId)}">
+      <label class="field-label">${escapeHtml(label)}</label>
+      <div class="attachment-list">${items}</div>
+      <div class="attachment-dropzone" data-attachment-dropzone>
+        \u{1F4CE} Click here, then paste an image (Ctrl+V) &mdash; or
+        <label class="btn" style="display:inline-block;margin-left:.4rem;">Choose file
+          <input type="file" accept="image/*,.pdf" multiple style="display:none">
+        </label>
+      </div>
+    </div>`;
+}
+
+function attachmentThumbHtml(token, id) {
+  return `
+    <div class="attachment-item" data-att-id="${id}">
+      <img src="${escapeHtml(attachmentUrl(token, id))}" loading="lazy" data-att-img="${id}">
+      <button type="button" class="attachment-remove" data-remove-att="${id}" title="Remove">&times;</button>
+    </div>`;
+}
+
+// Formats a value for read-only display — proper date formatting (unlike
+// cardFieldText, which never needed it), Yes/No for booleans, comma-joined
+// choice lists, and cardFieldText's own Ref/RefList/Text resolution for
+// everything else (things like "Modified by" are exactly the same kind of
+// untyped-mapping-hands-back-display-text case Location/Team are).
+function readOnlyFieldText(colId, rawValue) {
+  const meta = colMetaFor(colId);
+  const bt = meta ? baseType(meta.type) : "Text";
+  if (bt === "Date" || bt === "DateTime") {
+    const epoch = decodeDateValue(rawValue);
+    if (epoch == null) return "";
+    const d = new Date(epoch * 1000);
+    return bt === "DateTime" ? d.toLocaleString() : d.toLocaleDateString();
+  }
+  if (bt === "Bool") return rawValue ? "Yes" : "No";
+  if (bt === "ChoiceList") return decodeList(rawValue).join(", ");
+  if (bt === "Attachments") return decodeList(rawValue).length + " file(s)";
+  return cardFieldText(colId, rawValue);
+}
+
+function buildReadOnlyField(colId, label, rawValue) {
+  const text = readOnlyFieldText(colId, rawValue).trim();
+  const displayHtml = text ? escapeHtml(text) : `<span style="color:var(--muted);">—</span>`;
+  return `
+    <div class="field field-readonly">
+      <label class="field-label">${escapeHtml(label)}</label>
+      <div class="field-readonly-value">${displayHtml}</div>
+    </div>`;
+}
+
+async function buildGenericField(colId, label, rawValue) {
+  try {
+    const meta = colMetaFor(colId);
+    const bt = meta ? baseType(meta.type) : "Text";
+
+    if (bt === "Attachments") return await buildAttachmentField(colId, label, rawValue);
+    if (bt === "Ref") return await buildRefField(colId, label, rawValue, false, meta);
+    if (bt === "RefList") return await buildRefField(colId, label, rawValue, true, meta);
+    if (bt === "Choice") return buildChoiceField(colId, label, rawValue, meta, false);
+    if (bt === "ChoiceList") return buildChoiceField(colId, label, rawValue, meta, true);
+    if (bt === "Date") return buildDateField(colId, label, rawValue, false);
+    if (bt === "DateTime") return buildDateField(colId, label, rawValue, true);
+    if (bt === "Bool") return buildBoolField(colId, label, rawValue);
+    return buildTextField(colId, label, rawValue);
+  } catch (e) {
+    // One field failing to build (e.g. a cross-table fetch for a Ref field)
+    // must never take the rest of the popup down with it — every other
+    // mapped field would silently stop updating too, since this is awaited
+    // in a chain in openPopup with nothing above it to catch a throw.
+    console.error("Error building field for " + colId + ":", e);
+    const fallback = typeof rawValue === "string" || typeof rawValue === "number" ? rawValue : JSON.stringify(rawValue ?? "");
+    return buildTextField(colId, label, fallback);
+  }
+}
+
+function wireFieldEvents(body, rowId) {
+  body.querySelectorAll(".field-input[data-col-id], .field-select[data-col-id], .field-textarea[data-col-id]").forEach((el) => {
+    el.addEventListener("change", () => handleFieldChange(rowId, el));
+  });
+  body.querySelectorAll("input[type=checkbox][data-bool]").forEach((el) => {
+    el.addEventListener("change", () => handleFieldChange(rowId, el));
+  });
+
+  const attachmentFields = Array.from(body.querySelectorAll(".attachment-field"));
+  attachmentFields.forEach((fieldEl) => {
+    const colId = fieldEl.dataset.colId;
+    wireAttachmentThumbnailEvents(fieldEl, colId);
+
+    const zone = fieldEl.querySelector("[data-attachment-dropzone]");
+    zone.addEventListener("click", (e) => {
+      if (e.target.closest("label.btn")) return;
+      setActiveAttachmentField(colId, fieldEl);
+    });
+
+    const fileInput = fieldEl.querySelector("input[type=file]");
+    fileInput.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      if (files.length) await appendAttachments(rowId, colId, files, fieldEl);
+    });
+  });
+
+  // A lone attachment field is the obvious paste target — activate it
+  // automatically so pasting a screenshot works with zero extra clicks.
+  if (attachmentFields.length === 1) {
+    setActiveAttachmentField(attachmentFields[0].dataset.colId, attachmentFields[0]);
+  }
+}
+
+function setActiveAttachmentField(colId, fieldEl) {
+  state.activeAttachment = { colId, fieldEl };
+  document.querySelectorAll(".attachment-field").forEach((f) => f.classList.remove("paste-target"));
+  fieldEl.classList.add("paste-target");
+}
+
+async function handleFieldChange(rowId, el) {
+  const colId = el.dataset.colId;
+  if (!colId) return;
+  let value;
+  if (el.type === "checkbox") {
+    value = el.checked;
+  } else if (el.tagName === "SELECT" && el.multiple) {
+    const selected = Array.from(el.selectedOptions).map((o) => o.value);
+    value = el.dataset.refList === "1" ? ["L", ...selected.map(Number)] : ["L", ...selected];
+  } else if (el.dataset.refList === "0") {
+    value = el.value ? Number(el.value) : 0;
+  } else if (el.dataset.dateType === "date") {
+    value = el.value ? Math.floor(new Date(el.value + "T00:00:00Z").getTime() / 1000) : null;
+  } else if (el.dataset.dateType === "datetime") {
+    value = el.value ? Math.floor(new Date(el.value).getTime() / 1000) : null;
+  } else {
+    value = el.value;
+  }
+
+  const rec = findRecord(rowId);
+  const previousValue = rec ? getRawValueForCol(rec, colId) : undefined;
+
+  try {
+    await grist.getTable().update({ id: Number(rowId), fields: { [colId]: value } });
+    if (rec) pushUndo(rowId, colId, previousValue);
+  } catch (e) {
+    console.error("Error updating field:", e);
+    showToast("Could not save change: " + e.message);
+  }
+}
+
+// ========== ATTACHMENTS ==========
+async function ensureAccessToken() {
+  if (state.accessToken) return state.accessToken;
+  state.accessToken = await grist.docApi.getAccessToken({ readOnly: false });
+  return state.accessToken;
+}
+
+function attachmentUrl(token, id) {
+  return `${token.baseUrl}/attachments/${id}/download?auth=${token.token}`;
+}
+
+// Grist's attachment upload endpoint expects a multipart POST with an
+// "upload" field per file, and replies with the new _grist_Attachments row
+// ids in upload order.
+async function uploadFiles(files) {
+  const token = await ensureAccessToken();
+  const form = new FormData();
+  for (const f of files) form.append("upload", f, f.name || "pasted-image.png");
+  let resp;
+  try {
+    resp = await fetch(`${token.baseUrl}/attachments?auth=${token.token}`, {
+      method: "POST",
+      body: form,
+      // Matches the known-working community pattern for this endpoint;
+      // some server-side setups gate on this header being present.
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    });
+  } catch (e) {
+    // A network-level failure (CORS rejection, connectivity) surfaces here
+    // as a generic "Failed to fetch" with no HTTP status at all — rethrow
+    // with enough context to tell it apart from a real HTTP error below.
+    throw new Error("network error reaching the attachments endpoint (possibly a CORS restriction on this host) — " + e.message);
+  }
+  if (!resp.ok) throw new Error("upload failed (" + resp.status + ")");
+  return await resp.json();
+}
+
+async function appendAttachments(rowId, colId, files, fieldEl) {
+  try {
+    const newIds = await uploadFiles(files);
+    const rec = findRecord(rowId);
+    const existing = decodeList(getRawValueForCol(rec, colId)).map(Number);
+    const updated = existing.concat(newIds);
+    await grist.getTable().update({ id: Number(rowId), fields: { [colId]: ["L", ...updated] } });
+    pushUndo(rowId, colId, ["L", ...existing]);
+    await renderAttachmentThumbnails(fieldEl, colId, updated);
+    showToast("Attachment added");
+  } catch (e) {
+    console.error("Error uploading attachment:", e);
+    showToast("Could not upload file: " + e.message);
+  }
+}
+
+async function renderAttachmentThumbnails(fieldEl, colId, ids) {
+  const token = await ensureAccessToken();
+  const list = fieldEl.querySelector(".attachment-list");
+  list.innerHTML = ids.map((id) => attachmentThumbHtml(token, id)).join("");
+  wireAttachmentThumbnailEvents(fieldEl, colId);
+}
+
+function wireAttachmentThumbnailEvents(fieldEl, colId) {
+  fieldEl.querySelectorAll("img[data-att-img]").forEach((img) => {
+    img.addEventListener("click", () => openLightbox(img.src));
+    img.addEventListener("error", () => {
+      const wrap = img.parentElement;
+      img.remove();
+      const span = document.createElement("div");
+      span.className = "file-label";
+      span.textContent = "File #" + wrap.dataset.attId;
+      wrap.appendChild(span);
+    });
+  });
+
+  fieldEl.querySelectorAll("[data-remove-att]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.removeAtt);
+      const rowId = state.popupRecordId;
+      const rec = findRecord(rowId);
+      const currentIds = decodeList(getRawValueForCol(rec, colId)).map(Number);
+      const existing = currentIds.filter((x) => x !== id);
+      try {
+        await grist.getTable().update({ id: Number(rowId), fields: { [colId]: ["L", ...existing] } });
+        pushUndo(rowId, colId, ["L", ...currentIds]);
+        await renderAttachmentThumbnails(fieldEl, colId, existing);
+      } catch (e) {
+        console.error("Error removing attachment:", e);
+        showToast("Could not remove attachment: " + e.message);
+      }
+    });
+  });
+}
+
+  </script>
+</body>
+</html>
