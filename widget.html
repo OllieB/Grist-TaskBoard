@@ -1442,8 +1442,16 @@ function renderBins() {
   bins.querySelectorAll(".bin").forEach((el) => {
     el.addEventListener("click", () => {
       const url = el.dataset.url;
-      if (url) window.open(url, "_blank", "noopener");
-      else showToast("No link configured for this bin yet — set one in the widget options.");
+      if (!url) {
+        showToast("No link configured for this bin yet — set one in the widget options.");
+        return;
+      }
+      try {
+        window.parent.location.href = url;
+      } catch (e) {
+        console.error("Error navigating parent frame, falling back to a new tab:", e);
+        window.open(url, "_blank", "noopener");
+      }
     });
 
     // Native drag events, not Sortable — see the comment above
