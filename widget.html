@@ -786,8 +786,8 @@ function choiceFillColor(entries, label) {
   return entry ? normalizeHex(entry.fillColor) : null;
 }
 
-function isMobile() {
-  return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches;
+function isTouchInput() {
+  return window.matchMedia("(pointer: coarse)").matches;
 }
 
 function dateInputValue(epochSeconds) {
@@ -1374,7 +1374,7 @@ function setupDragAndDrop(board) {
   clearBinHighlight();
   draggedTaskId = null;
 
-  if (isMobile()) return;
+  if (isTouchInput()) return;
 
   board.querySelectorAll(".section-body").forEach((body) => {
     sortableInstances.push(new Sortable(body, {
@@ -1471,7 +1471,7 @@ function renderBins() {
     });
   });
 
-  if (!isMobile()) setupDragAndDrop(document.getElementById("board"));
+  if (!isTouchInput()) setupDragAndDrop(document.getElementById("board"));
 }
 
 window.addEventListener("resize", () => {
